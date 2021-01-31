@@ -9,6 +9,7 @@ import (
 
 	"github.com/lightningnetwork/lnd/lnrpc"
 	"github.com/lightningnetwork/lnd/macaroons"
+	"github.com/lightningnetwork/lnd/rpcperms"
 	"google.golang.org/grpc"
 	"gopkg.in/macaroon-bakery.v2/bakery"
 )
@@ -51,9 +52,17 @@ var (
 			Entity: "audit",
 			Action: "read",
 		}},
-		"/frdrpc.FaradayServer/CloseReport": {{
-			Entity: "report",
+		"/frdrpc.FaradayServer/CreateAccount": {{
+			Entity: "accounts",
+			Action: "write",
+		}},
+		"/frdrpc.FaradayServer/ListAccounts": {{
+			Entity: "accounts",
 			Action: "read",
+		}},
+		"/frdrpc.FaradayServer/RemoveAccount": {{
+			Entity: "accounts",
+			Action: "write",
 		}},
 	}
 
@@ -76,6 +85,12 @@ var (
 	}, {
 		Entity: "rates",
 		Action: "read",
+	}, {
+		Entity: "accounts",
+		Action: "read",
+	}, {
+		Entity: "accounts",
+		Action: "write",
 	}}
 
 	// macDbDefaultPw is the default encryption password used to encrypt the
@@ -154,15 +169,20 @@ func (s *RPCServer) stopMacaroonService() error {
 
 // macaroonInterceptor creates gRPC server options with the macaroon security
 // interceptors.
-func (s *RPCServer) macaroonInterceptor() []grpc.ServerOption {
-	unaryInterceptor := s.macaroonService.UnaryServerInterceptor(
-		RequiredPermissions,
-	)
-	streamInterceptor := s.macaroonService.StreamServerInterceptor(
-		RequiredPermissions,
-	)
+func (s *RPCServer) macaroonInterceptor() ([]grpc.ServerOption, error) {
+	interceptor := rpcperms.NewInterceptorChain(log, false, true)
+	interceptor.SetWalletUnlocked()
+	for method, permissions := range RequiredPermissions {
+		err := interceptor.AddPermission(method, permissions)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	unaryInterceptor := interceptor.MacaroonUnaryServerInterceptor()
+	streamInterceptor := interceptor.MacaroonStreamServerInterceptor()
 	return []grpc.ServerOption{
 		grpc.UnaryInterceptor(unaryInterceptor),
 		grpc.StreamInterceptor(streamInterceptor),
-	}
+	}, nil
 }

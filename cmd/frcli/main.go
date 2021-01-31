@@ -58,6 +58,9 @@ func main() {
 		fiatEstimateCommand,
 		onChainReportCommand,
 		closeReportCommand,
+		createAccountCommand,
+		listAccountsCommand,
+		removeAccountCommand,
 	}
 
 	if err := app.Run(os.Args); err != nil {

@@ -5,6 +5,7 @@ import (
 	"github.com/lightningnetwork/lnd/build"
 
 	"github.com/lightninglabs/faraday/accounting"
+	"github.com/lightninglabs/faraday/accounts"
 	"github.com/lightninglabs/faraday/dataset"
 	"github.com/lightninglabs/faraday/fiat"
 	"github.com/lightninglabs/faraday/frdrpc"
@@ -33,6 +34,7 @@ func init() {
 	addSubLogger(revenue.Subsystem, revenue.UseLogger)
 	addSubLogger(fiat.Subsystem, fiat.UseLogger)
 	addSubLogger(accounting.Subsystem, accounting.UseLogger)
+	addSubLogger(accounts.Subsystem, accounts.UseLogger)
 }
 
 // UseLogger uses a specified Logger to output package logging info.

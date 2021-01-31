@@ -11,6 +11,93 @@
     "application/json"
   ],
   "paths": {
+    "/v1/accounts": {
+      "get": {
+        "summary": "* frcli: `listaccounts`\nListAccounts returns all accounts that are currently stored in the account\ndatabase.",
+        "operationId": "ListAccounts",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/frdrpcListAccountsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
+            }
+          }
+        },
+        "tags": [
+          "FaradayServer"
+        ]
+      },
+      "post": {
+        "summary": "* frcli: `createaccount`\nCreateAccount adds an entry to the account database. This entry represents\nan amount of satoshis (account balance) that can be spent using off-chain\ntransactions (e.g. paying invoices).",
+        "description": "Macaroons can be created to be locked to an account. This makes sure that\nthe bearer of the macaroon can only spend at most that amount of satoshis\nthrough the daemon that has issued the macaroon.\n\nAccounts only assert a maximum amount spendable. Having a certain account\nbalance does not guarantee that the node has the channel liquidity to\nactually spend that amount.",
+        "operationId": "CreateAccount",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/frdrpcCreateAccountResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/frdrpcCreateAccountRequest"
+            }
+          }
+        ],
+        "tags": [
+          "FaradayServer"
+        ]
+      }
+    },
+    "/v1/accounts/{id}": {
+      "delete": {
+        "summary": "* frcli: `removeaccount`\nRemoveAccount removes the given account from the account database.",
+        "operationId": "RemoveAccount",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/frdrpcRemoveAccountResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "description": "*\nThe hexadecimal ID of the account to remove.",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "FaradayServer"
+        ]
+      }
+    },
     "/v1/faraday/closereport": {
       "get": {
         "summary": "*\nGet a channel close report for a specific channel.",
@@ -375,6 +462,35 @@
       ],
       "default": "UNKNOWN"
     },
+    "frdrpcAccount": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "*\nThe ID of the account."
+        },
+        "initial_balance": {
+          "type": "string",
+          "format": "uint64",
+          "description": "*\nThe initial balance in satoshis that was set when the account was created."
+        },
+        "current_balance": {
+          "type": "string",
+          "format": "uint64",
+          "description": "*\nThe current balance in satoshis."
+        },
+        "last_update": {
+          "type": "string",
+          "format": "int64",
+          "description": "*\nTimestamp of the last time the account was updated."
+        },
+        "expiration_date": {
+          "type": "string",
+          "format": "int64",
+          "description": "*\nTimestamp of the account's expiration date. Zero means it does not expire."
+        }
+      }
+    },
     "frdrpcBitcoinPrice": {
       "type": "object",
       "properties": {
@@ -511,6 +627,30 @@
         }
       }
     },
+    "frdrpcCreateAccountRequest": {
+      "type": "object",
+      "properties": {
+        "account_balance": {
+          "type": "string",
+          "format": "uint64",
+          "description": "*\nThe initial account balance in satoshis representing the maximum amount that\ncan be spent."
+        },
+        "expiration_date": {
+          "type": "string",
+          "format": "int64",
+          "description": "*\nThe expiration date of the account as a timestamp. Set to zero to never\nexpire."
+        }
+      }
+    },
+    "frdrpcCreateAccountResponse": {
+      "type": "object",
+      "properties": {
+        "account": {
+          "$ref": "#/definitions/frdrpcAccount",
+          "description": "*\nThe created account."
+        }
+      }
+    },
     "frdrpcCustomCategory": {
       "type": "object",
       "properties": {
@@ -602,6 +742,18 @@
       "default": "UNKNOWN_GRANULARITY",
       "description": "Granularity describes the aggregation level at which the Bitcoin price should\nbe queried. Note that setting lower levels of granularity may require more\nqueries to the fiat backend."
     },
+    "frdrpcListAccountsResponse": {
+      "type": "object",
+      "properties": {
+        "accounts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/frdrpcAccount"
+          },
+          "description": "*\nAll accounts in the account database."
+        }
+      }
+    },
     "frdrpcNodeAuditResponse": {
       "type": "object",
       "properties": {
@@ -657,6 +809,9 @@
           "description": "A boolean indicating whether we recommend closing the channel."
         }
       }
+    },
+    "frdrpcRemoveAccountResponse": {
+      "type": "object"
     },
     "frdrpcReportEntry": {
       "type": "object",

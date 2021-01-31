@@ -21,18 +21,18 @@ import (
 	"sync/atomic"
 
 	proxy "github.com/grpc-ecosystem/grpc-gateway/runtime"
-	"github.com/lightninglabs/lndclient"
-	"github.com/lightningnetwork/lnd/macaroons"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
-	"gopkg.in/macaroon-bakery.v2/bakery"
-
 	"github.com/lightninglabs/faraday/accounting"
+	"github.com/lightninglabs/faraday/accounts"
 	"github.com/lightninglabs/faraday/chain"
 	"github.com/lightninglabs/faraday/fiat"
 	"github.com/lightninglabs/faraday/recommend"
 	"github.com/lightninglabs/faraday/resolutions"
 	"github.com/lightninglabs/faraday/revenue"
+	"github.com/lightninglabs/lndclient"
+	"github.com/lightningnetwork/lnd/macaroons"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"gopkg.in/macaroon-bakery.v2/bakery"
 )
 
 var (
@@ -98,9 +98,10 @@ type RPCServer struct {
 	restServer *http.Server
 
 	macaroonService *macaroons.Service
+	accountService  *accounts.Service
 
-	restCancel func()
-	wg         sync.WaitGroup
+	mainCtxCancel func()
+	wg            sync.WaitGroup
 }
 
 // Config provides closures and settings required to run the rpc server.
@@ -170,6 +171,9 @@ func (s *RPCServer) Start() error {
 		}
 	}()
 
+	var mainCtx context.Context
+	mainCtx, s.mainCtxCancel = context.WithCancel(context.Background())
+
 	// Start the macaroon service and let it create its default macaroon in
 	// case it doesn't exist yet.
 	if err := s.startMacaroonService(); err != nil {
@@ -177,9 +181,17 @@ func (s *RPCServer) Start() error {
 	}
 	shutdownFuncs["macaroon"] = s.stopMacaroonService
 
+	if err := s.startAccountService(mainCtx, s.cfg.Lnd); err != nil {
+		return fmt.Errorf("error starting account service: %v", err)
+	}
+	shutdownFuncs["accountService"] = s.stopAccountService
+
 	// First we add the security interceptor to our gRPC server options that
 	// checks the macaroons for validity.
-	serverOpts := s.macaroonInterceptor()
+	serverOpts, err := s.macaroonInterceptor()
+	if err != nil {
+		return fmt.Errorf("error with macaroon interceptor: %v", err)
+	}
 
 	// Add our TLS configuration and then create our server instance. It's
 	// important that we let gRPC create the TLS listener and we don't just
@@ -190,7 +202,6 @@ func (s *RPCServer) Start() error {
 	s.grpcServer = grpc.NewServer(serverOpts...)
 
 	// Start the gRPC RPCServer listening for HTTP/2 connections.
-	var err error
 	log.Info("Starting gRPC listener")
 	s.rpcListener, err = net.Listen("tcp", s.cfg.RPCListen)
 	if err != nil {
@@ -221,8 +232,6 @@ func (s *RPCServer) Start() error {
 
 		// We'll dial into the local gRPC server so we need to set some
 		// gRPC dial options and CORS settings.
-		var restCtx context.Context
-		restCtx, s.restCancel = context.WithCancel(context.Background())
 		mux := proxy.NewServeMux(customMarshalerOption)
 		var restHandler http.Handler = mux
 		if s.cfg.CORSOrigin != "" {
@@ -249,7 +258,7 @@ func (s *RPCServer) Start() error {
 			)
 		}
 		err = RegisterFaradayServerHandlerFromEndpoint(
-			restCtx, mux, restProxyDest, proxyOpts,
+			mainCtx, mux, restProxyDest, proxyOpts,
 		)
 		if err != nil {
 			return err
@@ -294,10 +303,17 @@ func (s *RPCServer) StartAsSubserver(lndClient lndclient.LndServices) error {
 		return errServerAlreadyStarted
 	}
 
+	var mainCtx context.Context
+	mainCtx, s.mainCtxCancel = context.WithCancel(context.Background())
+
 	// Start the macaroon service and let it create its default macaroon in
 	// case it doesn't exist yet.
 	if err := s.startMacaroonService(); err != nil {
 		return fmt.Errorf("error starting macaroon service: %v", err)
+	}
+
+	if err := s.startAccountService(mainCtx, lndClient); err != nil {
+		return fmt.Errorf("error starting RPC interceptor: %v", err)
 	}
 
 	s.cfg.Lnd = lndClient
@@ -325,8 +341,9 @@ func (s *RPCServer) Stop() error {
 		return nil
 	}
 
+	s.mainCtxCancel()
+
 	if s.restServer != nil {
-		s.restCancel()
 		err := s.restServer.Close()
 		if err != nil {
 			log.Errorf("unable to close REST listener: %v", err)
@@ -335,6 +352,10 @@ func (s *RPCServer) Stop() error {
 
 	if err := s.macaroonService.Close(); err != nil {
 		log.Errorf("Error stopping macaroon service: %v", err)
+	}
+
+	if err := s.stopAccountService(); err != nil {
+		log.Errorf("Error stopping account service: %v", err)
 	}
 
 	// Stop the grpc server and wait for all go routines to terminate.
